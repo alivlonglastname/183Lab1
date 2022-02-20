@@ -51,24 +51,12 @@ module Program_Counter (
 	
 	assign pc = pcc;
 endmodule
-/* 	1# this "ctrl_unit" is essentially also the "regs" block in our diagram combined with "ROM IR" block in our diagram, it controls everything and is also the one outputting ra and rb and such.
 
-	2# i think controller is almost done, still need to double check  assignments and implement clk.
-	
-	3# still need to flush out alu, but also almost done, also needs clk implementation
-	
-	4# then need to hook up controller to ROM, then hook up ALU and PC to their MUXs
-	
-	5# after that, we begin troubleshooting
-	
-	6# challenges: figure out clk cycles, most things probably only need 1 i think. also might run into issues with wires and regs and stuff. But from what i understand, if a module's output is going into a different module's input, use wire.
-		we also might run into issues with timing, but hopefully buffers can mitigate those problems.
-*/
 module Ctrl_Unit (
 	input wire [7:0] instruction,
 	input	[2:0]	wbvalue,
 	//input			wb, //commented this out
-	input [7:0] pc;
+	input pc; /* im not sure what size this should be */
 	output wire pcctrl, wbctrl
 	output re_bar,
 	output we_bar,
