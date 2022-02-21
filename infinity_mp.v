@@ -13,6 +13,24 @@ module top_lab1(
  
 endmodule 
 
+module 21mux (
+	input [7:0] one, 
+	input [7:0] zero,
+	input control,
+	output [7:0] out
+)
+	reg [7:0] temp;
+	always @(*) begin
+		if (control == 1) begin
+			temp = one;
+		end
+		else begin
+			temp = zero;
+		end
+	end
+	assign out = temp;
+endmodule
+
 module infinity_mp(
 	input clk,rst_bar,
 	output [7:0] MAddr,
@@ -26,204 +44,217 @@ module infinity_mp(
 	reg	[7:0] roma;
 	reg [7:0] dataout;
 	reg [7:0] data;
-	
-	Program_Counter pu0(.clk(clk),.pc(pcaddr));
+
+	//21mux pcmux(.one(wbvalue), .zero(pcaddr+1), .control(br), .out(pcin)) //PCmux, either pc=pc+1 or pc=rb
+	Program_Counter pu0(.clk(clk),.pcin(pcaddr));
+	PC_ctrl pc1(.wbvalue) //write me
 	Ctrl_Unit pu1(.opcode(opcode),.ra(ra),.rb(rb),.re_bar(re_bar),.we_bar(we_bar),.wb(wb),.ram_en_bar(ram_en_bar),.MAddr(MAddr).MData(MData));
 	reg_blk pu2(.instruction(MData),.wbvalue(wbvalue),.wb(wb),.opcode(opcode),.oprand(oprand),.ra(ra),.rb(rb));
-	ALU_wbsel(.opcode(opcode),oprand(oprand),datain(MData),.ra(ra),.rb(rb),.wbvalue(wbvalue));
+	ALU_wbsel pu3(.opcode(opcode),oprand(oprand),datain(MData),.ra(ra),.rb(rb),.wbvalue(wbvalue));
 	
 );
 	
 
+//PC_ctrl
+module PC_ctrl(
+	input [2:0]	wbvalue,
+	input	br,
+	input	[7:0] pcaddr,
 
+	output	[7:0] pcin
+
+);
+	wire [7:0] wwbvalue = {5'b00000,wbvalue};
+	wire [7:0] upd_pcadder = pcaddr+1'b1;
+
+	21mux pcmux(.one(wwbvalue), .zero(upd_pcadder), .control(br), .out(pcin)) //PCmux, either pc=pc+1 or pc=rb
+	
+endmodule
+
+// PC Done - Ali
 module Program_Counter (
 	input clk,
+	input [7:0] pcin,
 	//input flag,
 	output [7:0] pc
 );
 	reg [7:0] pcc;
 	always @(posedge clk) begin
-		if (flag == 1'b1) begin
-			pcc <=pcc+1;
-			
-		end
+		pcc <= pcin;
 	end
 	
 	assign pc = pcc;
 endmodule
-/* 	1# this "ctrl_unit" is essentially also the "regs" block in our diagram combined with "ROM IR" block in our diagram, it controls everything and is also the one outputting ra and rb and such.
 
-	2# i think controller is almost done, still need to double check  assignments and implement clk.
-	
-	3# still need to flush out alu, but also almost done, also needs clk implementation
-	
-	4# then need to hook up controller to ROM, then hook up ALU and PC to their MUXs
-	
-	5# after that, we begin troubleshooting
-	
-	6# challenges: figure out clk cycles, most things probably only need 1 i think. also might run into issues with wires and regs and stuff. But from what i understand, if a module's output is going into a different module's input, use wire.
-		we also might run into issues with timing, but hopefully buffers can mitigate those problems.
-*/
-module Ctrl_Unit (
-	input wire [7:0] instruction,
+
+
+
+
+
+module reg_blk(
+	input	[7:0]	instruction,
 	input	[2:0]	wbvalue,
-	//input			wb, //commented this out
-	input [7:0] pc;
-	output wire pcctrl, wbctrl
+	input			wb,
+	
+	output	[2:0]	opcode,oprand,raout,rbout
+);
+	reg LDI = 0;
+	reg [7:0] RF [0:7];
+	reg [2:0] rb, ra;
+	reg [7:0] instr;
+	always @(*) begin
+		instr = instruction;
+		opcode = instr[7:6];
+		rb = instr[2:0]; //rb is the address
+		if (opcode == 2'b11) begin
+			oprand = instr [5:3];
+			// most recent edit:\
+			if (oprand == 111) begin
+				LDI = 1;
+			end else begin
+				LDI = 0;
+			end
+			//
+		end
+		else if (opcode != 2'b11) begin
+			ra = instr [5:3];
+		end
+		if (wb == 1'b1) begin
+			RF[rb] = wbvalue;
+		end
+	end
+	assign raout = RF[ra];
+	assign rbout = RF[rb];	
+endmodule
+
+module Ctrl_Unit (
+	input [1:0] opcode,
+	input [2:0] ra,
+	input [2:0] rb,
 	output re_bar,
 	output we_bar,
 	output wb,ram_en_bar,
 	output [2:0] MAddr,
-	output [2:0] MData,
-	output	[2:0]	opcode,oprand,ra,rb
+	output [2:0] MData
 );
-	reg [1:0] opcodeREG;
-	reg [2:0] raa = 3'b000;
-	reg [2:0] rbb;
-	reg [2:0] oprandREG;
-	reg wb = 1'b0;
-	reg  [7:0] instr;
-	reg alu; // True if opcode is 11, false otherwise
-	reg pcctrl_temp, wbctrl_temp;
-
-	always @(*) begin /* implement clk */
-		// Instruction decoder: Are we dealing w RA or operand?
-		instr = instruction; 
-		opcodeREG = instr[7:6];
-		rbb = instr[2:0];
-		if (opcodeREG == 2'b11) begin // I EDITED THE CODE HERE (CHANGED != TO ==)
-			oprandREG = instr [5:3];
-			alu = 1;
+	always @(*) begin
+		if	(opcode == 2'b00) begin //MOVE: RA -> RB
+			re_barr = 1'b1;
+			we_barr = 1'b1;
+			ram_en_bar = 1'b1;
+			wbb = 1'b1;
 		end
-		else if (opcodeREG != 2'b11) begin // I EDITED THE CODE HERE (CHANGED == TO !=)
-			raa = instr [5:3]; //if opcode is not 11, [5:3] is RA
-			alu = 0;
+		else if	(opcode == 2'b01) begin //LOAD: M[RA] -> RB
+			re_barr = 1'b0;
+			we_barr = 1'b1;	
+			ram_en_bar = 1'b0;
+			wbb = 1'b1;
 		end
-		if (wb == 1'b1) begin /* i think this should always update rb right?*/
-			rb = wbvalue;
-			wb = 1'b0;
+		else if (opcode == 2'b10) begin //STORE: RB -> M[RA]
+			re_barr = 1'b1;
+			we_barr = 1'b0;
+			ram_en_bar = 1'b0;
+			MAddrr = ra;
+			MDataa = rb;
+			wbb = 1'b0;
 		end
-		// Instruction decoder END
-		case (opcodeREG)
-			2'b00 : begin //MOVE: RA -> RB
-				re_barr = 1'b1;
-				we_barr = 1'b1;
-				ram_en_bar = 1'b1;
-				wb = 1'b1; //EDITED: wbb -> wb
-			end
-			
-			2'b01 : begin //LOAD: M[RA] -> RB
-				re_barr = 1'b0;
-				we_barr = 1'b1;	
-				ram_en_bar = 1'b0;
-				wb = 1'b1; //EDITED: wbb -> wb
-			end
-			
-			2'b10 : begin //STORE: RB -> M[RA]
-				re_barr = 1'b1;
-				we_barr = 1'b0;
-				ram_en_bar = 1'b0;
-				MAddrr = ra;
-				MDataa = rb;
-				wb = 1'b0; //EDITED: wbb -> wb
-			end
-			
-			2'b11 : begin //ALU
-				re_barr = 1'b1;
-				we_barr = 1'b1;
-				wb = 1'b1; //EDITED: wbb -> wb
-				ram_en_bar = 1'b0;
-			end
-		endcase
-		#10 if (alu == 1) begin // delay needs to happen here because alu has to be calculated first
-			case (oprandREG)
-				3'b011: begin //BRANCH: RB->PC || pcctrl = 0
-					pcctrl = 0;
-				end
-				
-				3'b100 : begin //BRANCH IF Z: RB->PC if Z
-					if (r1 == 0) begin /* COME BACK HERE: IDK WHICH NUMBER IM CHECKING TO SEE IF 0, IS IT R1 OR RB? */
-						pcctrl = 0;
-					end
-					else begin
-						pcctrl = 1;
-					end
-				end
-				
-				3'b101 : begin //BRANCH IF N: RB->PC if N
-					if (r1 < 0) begin /* COME BACK HERE: IDK WHICH NUMBER IM CHECKING TO SEE IF 0, IS IT R1 OR RB? */
-						pcctrl = 0;
-					end
-					else begin
-						pcctrl = 1;
-					end
-				end
-				
-				3'b110 : begin //JUMP AND LINK : PC+1-> RB || RB->PC 
-					/*check if this is ok: set pcctrl to 1 (so rb goes to pc), drive wbctrlmux with pc+1 by storing it in ra? */ 
-					raa <= pc+1; // blocking statement because i want things to happen sequentially
-					wbctrl = 1;
-					pcctrl = 1;
-				end
-			endcase
-
-
-		end
-		
-		
+		else if (opcode == 2'b11) begin //ALU
+			re_barr = 1'b1;
+			we_barr = 1'b1;
+			wbb = 1'b1;
+			ram_en_bar = 1'b1;
+		end			
 	end	
-	// ASSIGNMENTS
+	
 	assign re_bar = re_barr;
 	assign we_bar = we_barr;
 	assign wb = wbb;
 	assign MAddr = MAddrr;
 	assign MData = MDataa;
-	assign opcode = opcodeREG;
-	assign oprand = oprandREG;
-	assign ra=raa;
-	assign rb=rbb;
-	
 endmodule
 
 
-
-
 module ALU_wbsel(
-	input	[2:0] opcode,oprand,datain,ra,rb,
-	output	[2:0] wbvalue
+	input	[2:0] opcode,oprand,datain,ra,rb,pc,
+	output	[2:0] wbvalue, pcwrite,
+	output	br
 	);
 	reg [2:0] r1 = 3'b000;
-	
+	reg [2:0] ALU_out;
+	reg [7:0] temp;
 	always @(*) begin
-		if (opcode == 2'b00) begin //MOVE: RA -> RB | wbctrl = 1 | we = 1
+
+		
+
+		if (opcode == 2'b00) begin //Move
 			ALU_out = ra;
 			wbvalue = ALU_out;
+			br = 1'b0;
 		end
-		else if (opcode == 2'b01) begin //LOAD: M[RA] -> RB || wbctrl = 0 || we = 1
-			wbvalue = datain; /*idk what this is, i think alu doesnt do anything here*/
+		else if (opcode == 2'b01) begin //Load
+			wbvalue = datain;
+			br = 1'b0;
 		end
-		
-		else if (opcode == 2'b11) begin //Arithmetic operation
-			if (oprand == 3'b000) begin //AND: (RB & R1) -> RB || wbctrl = 1 || we = 1
+		else if (opcode == 2'b10) begin //store
+			br = 1'b0;
+		end
+		else if (opcode == 2'b11) begin
+			if (oprand == 3'b000) begin //and
 				ALU_out = rb & r1;
 				wbvalue = ALU_out;
+				br = 1'b0;
 			end
-			
-			else if (oprand == 3'b001) begin //ADD: (RB + R1) -> RB || wbctrl = 1 || we = 1
+			else if (oprand == 3'b001) begin //plus
 				ALU_out = rb + r1;
 				wbvalue = ALU_out;
+				br = 1'b0;
 			end
-			
-			else if (oprand == 3'b010) begin //EDITED: 011 TO 010
-											//SUB: (RB - R1) -> RB || wbctrl = 1 || we = 1
+			else if (oprand == 3'b010) begin  //minus
 				ALU_out = rb - r1;
 				wbvalue = ALU_out;
+				br = 1'b0;
 			end
-			else if (oprand == 3'b111) begin //LOAD IMMEDIATE: M[next byte] -> RB || PC+1 -> PC
-				/*i dont actually remember what this is supposed to do so... implementing later uwu*/
+			//new code added by Puchen
+			else if (oprand == 3'b011) begin //BR
+				//ALU_out = rb - r1;
+				wbvalue = rb;
+				pcwrite = rb;
+				br = 1'b1;
 			end
 			
+			else if (oprand == 3'b100) begin //BRZ
+				wbvalue = rb;
+				pcwrite = rb;
+				if (ra == 3'b000) begin //z=1
+					br = 1'b1;
+				end else begin
+					br = 1'b0;
+				end
+			end	
 
+			else if (oprand == 3'b101) begin //BRN
+				wbvalue = rb;
+				pcwrite = rb;
+				if (ra[2] == 1'b1) begin //N=1
+					br = 1'b1;
+				end else begin
+					br = 1'b0;
+				end
+			end		
+			
+			else if (oprand == 3'b110) begin //JNL  need to figure out clock
+				temp = rb;
+				wbvalue = pc+1;
+				pcwrite = temp;
+				br = 1'b1;
+			end	
+			
+			else if (oprand == 3'b111) begin //LDI  need to figure out clock
+				wbvalue = pc+1'b1;
+				br = 1'b0;
+			end	
+		end
+			
  	end
 endmodule
 
@@ -265,7 +296,4 @@ module RAM8x128 (D, in, A, we_bar, re_bar , ram_en_bar, clk);
 	end
 	end
 	assign D = out;
-endmodule	
-	
-
-
+endmodule

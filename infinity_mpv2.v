@@ -38,21 +38,21 @@ endmodule
 // reg_blk done
 module reg_blk (
     input [2:0] A_addr, B_addr, wb_en, //if wb_en = 1, write into RB
-    input [7:0] wb; //the value of wb
+    input [7:0] wb, //the value of wb
     output [7:0] A, B, R1
 );
 
-reg [7:0] rf [0:7]; //Register file
+    reg [7:0] rf [0:7]; //Register file
 
-assign A = rf[A_addr];
-assign B = rf[B_addr];
+    assign A = rf[A_addr];
+    assign B = rf[B_addr];
 
-always @(*) begin
-   if (wb_en) begin //if wb is enabled
-       rf[B_addr] = wb;
-   end
-    
-end
+    always @(*) begin
+        if (wb_en) begin //if wb is enabled
+            rf[B_addr] = wb;
+        end
+        
+    end
 
 
 endmodule
@@ -61,7 +61,7 @@ endmodule
 module alu (
     input [7:0] A, B,
     output N, Z, 
-    output [7:0] add, sub, aand, RA;
+    output [7:0] add, sub, aand, RA
 );
 assign add = B+A;
 assign sub = B-A;
@@ -72,68 +72,89 @@ endmodule
 
 // instruction reg done
 module intruction_reg(
-		input [7:0]	instruction,
+		input [7:0]	instruction, pc,
 		output	[1:0]	opcode,
 		output	[2:0]	oprand,
-		output	[2:0]	A_addr,B_addr
+		output	[2:0]	A_addr,B_addr,
+        output [7:0] temp_to_ctrl
 );
-	reg	[2:0]	ooprand, AA_addr;
+	reg	[2:0]	ooprand, AA_addr, BB_addr;
+    reg [1:0] oopcode;
+    reg freeze;
+    reg [7:0] temp;
+    reg [7:0] temp1;
 
-	assign	opcode = instruction[7:6];
-	assign	B_addr = instruction[2:0];
 	always @(*) begin
-		if	(opcode == 2'b11) begin
-			ooprand = instruction[5:3];
-		end
-		else begin
-			AA_addr = instruction[5:3];
-		end
-	end
+        if (freeze) begin
+            if ((pc != temp) & (pc != (temp+1'b1))) begin
+                freeze = 1'b0;
+            end
+        end
+
+        if (~freeze) begin //if freeze is 0, proceed as normal
+            oopcode = instruction[7:6]; 
+            BB_addr = instruction[2:0];
+            if	(opcode == 2'b11) begin
+                ooprand = instruction[5:3];
+                if (ooprand == 3'b111) begin
+                    freeze = 1;
+                    temp = pc;
+                end
+            end
+            else begin
+                AA_addr = instruction[5:3];
+            end
+        end 
+    end
+    assign temp_to_ctrl = temp;
+	assign	opcode = oopcode;
+	assign	B_addr = BB_addr;
     assign	A_addr = AA_addr;
 	assign 	oprand = ooprand;
-	
+	// work on ctrl unit
 endmodule
 
 module control(
 	input	[1:0]	opcode,
 	input	[2:0]	oprand,
+    input [7:0] temp_to_ctrl, pc,
 	input	N,Z,
-	output wr_bar, rd_bar, ram_en_bar, wb_en, br,
+	output we_bar, rd_bar, ram_en_bar, wb_en, br,
     output [2:0] sel
 );
 
 
-    reg re_barr, wr_barr, ram_en_barr, wbb_en, brr;
+    reg re_barr, we_barr, ram_en_barr, wbb_en, brr;
     reg [2:0] sell;
  	always @(*) begin
-        brr = 0;
+        brr = 0; //reset branch to 0
 		if	(opcode == 2'b00) begin //MOVE: RA -> RB
 			re_barr = 1'b1;
 			we_barr = 1'b1;
-			ram_en_bar = 1'b1;
+			ram_en_barr = 1'b1;
 			wbb_en = 1'b1;
             sell = 0;
 		end
 		else if	(opcode == 2'b01) begin //LOAD: M[RA] -> RB
 			re_barr = 1'b0;
 			we_barr = 1'b1;	
-			ram_en_bar = 1'b0;
+			ram_en_barr = 1'b0;
 			wbb_en = 1'b1;
             sell = 1;
 		end
 		else if (opcode == 2'b10) begin //STORE: RB -> M[RA]
 			re_barr = 1'b1;
 			we_barr = 1'b0;
-			ram_en_bar = 1'b0;
-			MAddrr = ra;
-			MDataa = rb;
+			ram_en_barr = 1'b0;
+			//MAddrr = ra; /* fix me */
+			//MDataa = rb;
 			wbb_en = 1'b0;
 		end
 		else if (opcode == 2'b11) begin //ALU
 			re_barr = 1'b1;
 			we_barr = 1'b1;
 			wbb_en = 1'b1;
-			ram_en_bar = 1'b1;
+			ram_en_barr = 1'b1;
             case (oprand)
                 3'b000: begin // and
                     wbb_en = 1'b1;
@@ -166,10 +187,18 @@ module control(
 
                 3'b110: begin //jl
                     wbb_en = 1'b1;
+                    sell = 5;
+                    brr = 1;
                 end
 
                 3'b111: begin //ldi
-                    wbb_en = 1'b0;
+                    if (pc == temp_to_ctrl) begin
+                        wbb_en = 0;
+                    end
+                    else if (pc == temp_to_ctrl+1) begin
+                        wbb_en = 1'b1;
+                        sell = 6;
+                    end
                 end
             endcase
 		end			
@@ -181,42 +210,33 @@ assign re_bar = re_barr;
 assign we_bar = we_barr;
 assign ram_en_bar = ram_en_barr;
 assign wb_en = wbb_en;
-// Move
-
-// load
-
-// store
-
-// and
-
-// add
-
-// sub
-
-// branch
-
-// biz
-
-// bin
-
-// jl
-
-// LDI
 
 endmodule
 
 module pc(
+	input	br, clk, 
+    input [7:0] A, B,
+	output [7:0] pc_out,
+    output [7:0] pc_to_wb  //write back pc+1 to wb
+	
 
 );
+	reg[7:0] pctemp, pc, pc_to_wbb, pc_c;
 	always @(*) begin
+		
 		if (br == 1'b0) begin;
 			pc_c = pc + 1'b1; //increment
 		end
 		else begin
-			pc_c = 
-	end
+			pc_c = B;
+	    end
+    end
 	
 	always @(posedge clk) begin
 		pc <= pc_c;
+        pc_to_wbb <= pc+1'b1;
 	end
+    assign pc_to_wb = pc_to_wbb;
+    assign pc_out = pc;
+	//assign pc_to_wb = pctemp;
 endmodule
